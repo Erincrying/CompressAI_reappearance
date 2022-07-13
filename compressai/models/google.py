@@ -392,6 +392,7 @@ class MeanScaleHyperprior(ScaleHyperprior):
         return {"x_hat": x_hat}
 
 
+# 联合自回归超先验网络
 class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
     r"""Joint Autoregressive Hierarchical Priors model from D.
     Minnen, J. Balle, G.D. Toderici: `"Joint Autoregressive and Hierarchical

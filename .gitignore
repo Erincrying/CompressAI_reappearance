@@ -8,6 +8,7 @@ compressai/version.py
 tags
 venv*/
 venv/
+imageNet/
 
 # Created by gitignore.io
 ### Python ###

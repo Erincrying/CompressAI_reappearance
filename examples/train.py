@@ -43,7 +43,7 @@ from torchvision import transforms
 from compressai.datasets import ImageFolder
 from compressai.zoo import image_models
 
-
+# 率失真
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
 
@@ -66,7 +66,7 @@ class RateDistortionLoss(nn.Module):
 
         return out
 
-
+# 计算平均值
 class AverageMeter:
     """Compute running average."""
 
@@ -85,6 +85,7 @@ class AverageMeter:
 
 class CustomDataParallel(nn.DataParallel):
     """Custom DataParallel to access the module methods."""
+    """自定义DataParallel以访问模块方法"""
 
     def __getattr__(self, key):
         try:
@@ -96,6 +97,7 @@ class CustomDataParallel(nn.DataParallel):
 def configure_optimizers(net, args):
     """Separate parameters for the main optimizer and the auxiliary optimizer.
     Return two optimizers"""
+    """主优化器和辅助优化器的单独参数。返回两个优化器"""
 
     parameters = {
         n
@@ -126,7 +128,7 @@ def configure_optimizers(net, args):
     )
     return optimizer, aux_optimizer
 
-
+# 一个迭代，后面循环多个迭代
 def train_one_epoch(
     model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm
 ):
@@ -162,7 +164,7 @@ def train_one_epoch(
                 f"\tAux loss: {aux_loss.item():.2f}"
             )
 
-
+# 测试迭代（验证迭代？）
 def test_epoch(epoch, test_dataloader, model, criterion):
     model.eval()
     device = next(model.parameters()).device
@@ -280,25 +282,29 @@ def parse_args(argv):
 
 
 def main(argv):
-    args = parse_args(argv)
+    args = parse_args(argv) # 加载命令参数数据
 
+    # 随机种子
     if args.seed is not None:
         torch.manual_seed(args.seed)
         random.seed(args.seed)
 
     train_transforms = transforms.Compose(
+        # transforms.RandomCrop随机剪裁，同tf.image.random_crop
+        # transforms.ToTensor()的作用就是变换图像数据为tensor并shape转化为[channel, h, w]
         [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
     )
 
     test_transforms = transforms.Compose(
+        # transforms.CenterCrop以图片中心进行裁剪
         [transforms.CenterCrop(args.patch_size), transforms.ToTensor()]
     )
-
+    # 区分数据集文件夹下的train、test做字符串拆分区分两个数据集
     train_dataset = ImageFolder(args.dataset, split="train", transform=train_transforms)
     test_dataset = ImageFolder(args.dataset, split="test", transform=test_transforms)
 
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
-
+    # 加载数据集以及相应的参数
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -320,8 +326,10 @@ def main(argv):
 
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
-
+    # 优化器设置，configure_optimizers包含了相应的参数设置
     optimizer, aux_optimizer = configure_optimizers(net, args)
+    # torch.optim.lr_scheduler:该方法中提供了多种基于epoch训练次数进行学习率调整的方法;
+    # 有两种模式min和max，min表示指标不再降低，max表示指标停止增加
     lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min")
     criterion = RateDistortionLoss(lmbda=args.lmbda)
 
@@ -330,6 +338,7 @@ def main(argv):
         print("Loading", args.checkpoint)
         checkpoint = torch.load(args.checkpoint, map_location=device)
         last_epoch = checkpoint["epoch"] + 1
+        # torch.load_state_dict()函数就是用于将预训练的参数权重加载到新的模型之中
         net.load_state_dict(checkpoint["state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         aux_optimizer.load_state_dict(checkpoint["aux_optimizer"])
