@@ -403,12 +403,16 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
         N (int): Number of channels
         M (int): Number of channels in the expansion layers (last layer of the
             encoder and last layer of the hyperprior decoder)
+        N（int）：通道数
+        M（int）：扩展层中的通道数（扩展层的最后一层）编码器和超先验解码器的最后一层
     """
 
     def __init__(self, N=192, M=192, **kwargs):
         super().__init__(N=N, M=M, **kwargs)
-
+        # torch.nn.Sequential是一个Sequential容器，模块将按照构造函数中传递的顺序添加到模块中
+        # 神经网络模块将按照在传入构造器的顺序依次被添加到计算图中执行，同时以神经网络模块为元素的有序字典也可以作为传入参数。
         self.g_a = nn.Sequential(
+            # conv(in_channels, out_channels, kernel_size=5, stride=2)
             conv(3, N, kernel_size=5, stride=2),
             GDN(N),
             conv(N, N, kernel_size=5, stride=2),
@@ -473,10 +477,12 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
         y_hat = self.gaussian_conditional.quantize(
             y, "noise" if self.training else "dequantize"
         )
-        ctx_params = self.context_prediction(y_hat)
+        ctx_params = self.context_prediction(y_hat) # φ
+        # 混合高斯模型
         gaussian_params = self.entropy_parameters(
             torch.cat((params, ctx_params), dim=1)
         )
+        # 方差、均值
         scales_hat, means_hat = gaussian_params.chunk(2, 1)
         _, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
         x_hat = self.g_s(y_hat)
