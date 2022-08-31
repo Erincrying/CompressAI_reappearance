@@ -407,7 +407,9 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
         M（int）：扩展层中的通道数（扩展层的最后一层）编码器和超先验解码器的最后一层
     """
 
-    def __init__(self, N=192, M=192, **kwargs):
+    # def __init__(self, N=192, M=192, **kwargs): #原始定义
+    def __init__(self, N=192, M=256, **kwargs): # ll更改
+
         super().__init__(N=N, M=M, **kwargs)
         # torch.nn.Sequential是一个Sequential容器，模块将按照构造函数中传递的顺序添加到模块中
         # 神经网络模块将按照在传入构造器的顺序依次被添加到计算图中执行，同时以神经网络模块为元素的有序字典也可以作为传入参数。

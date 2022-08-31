@@ -137,7 +137,7 @@ def inference_entropy_estimation(model, x):
     x = x.unsqueeze(0)
 
     start = time.time()
-    out_net = model.forward(x)
+    out_net = model.forward(x) # 前向传播可获取x_hat
     elapsed_time = time.time() - start
 
     num_pixels = x.size(0) * x.size(2) * x.size(3)
@@ -164,7 +164,7 @@ def load_checkpoint(arch: str, checkpoint_path: str) -> nn.Module:
     state_dict = load_state_dict(torch.load(checkpoint_path))
     return architectures[arch].from_state_dict(state_dict).eval()
 
-
+# 评估模型
 def eval_model(model, filepaths, entropy_estimation=False, half=False):
     device = next(model.parameters()).device
     metrics = defaultdict(float)
@@ -176,7 +176,7 @@ def eval_model(model, filepaths, entropy_estimation=False, half=False):
                 x = x.half()
             rv = inference(model, x)
         else:
-            rv = inference_entropy_estimation(model, x)
+            rv = inference_entropy_estimation(model, x) # 获取相关性能值psnr等
         for k, v in rv.items():
             metrics[k] += v
     for k, v in metrics.items():

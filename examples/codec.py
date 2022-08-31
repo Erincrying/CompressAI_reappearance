@@ -279,8 +279,9 @@ def encode_image(input, codec: CodecInfo, output):
             raise NotImplementedError(f"Unsupported video format: {org_seq.format}")
         x = convert_yuv420_rgb(org_seq[0], codec.device, max_val)
     else:
+        # 按给定途径读取图片，补零转换为tensor
         img = load_image(input)
-        x = img2torch(img)
+        x = img2torch(img) # 补零转换为tensor
         bitdepth = 8
 
     h, w = x.size(2), x.size(3)
