@@ -40,7 +40,7 @@ from compressai.layers import (
 
 from .google import JointAutoregressiveHierarchicalPriors
 
-
+# 混合高斯模型Learned Image Compression with Discretized Gaussian Mixture Likelihoods and Attention Modules
 class Cheng2020Anchor(JointAutoregressiveHierarchicalPriors):
     """Anchor model variant from `"Learned Image Compression with
     Discretized Gaussian Mixture Likelihoods and Attention Modules"
