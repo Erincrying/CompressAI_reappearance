@@ -128,10 +128,10 @@ class Cheng2020Attention(Cheng2020Anchor):
         super().__init__(N=N, **kwargs)
 
         self.g_a = nn.Sequential(
-            ResidualBlockWithStride(3, N, stride=2),
-            ResidualBlock(N, N),
-            ResidualBlockWithStride(N, N, stride=2),
-            AttentionBlock(N),
+            ResidualBlockWithStride(3, N, stride=2), # 第1、2层，虚线1x1卷积连接
+            ResidualBlock(N, N), # 第3、4层，实线，残差连接
+            ResidualBlockWithStride(N, N, stride=2), # 第5、6层，虚线1x1卷积连接
+            AttentionBlock(N), # 注意力模块
             ResidualBlock(N, N),
             ResidualBlockWithStride(N, N, stride=2),
             ResidualBlock(N, N),
