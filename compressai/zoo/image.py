@@ -48,7 +48,7 @@ __all__ = [
     "cheng2020_anchor",
     "cheng2020_attn",
 ]
-
+# 模型结构对应
 model_architectures = {
     "bmshj2018-factorized": FactorizedPrior,
     "bmshj2018-hyperprior": ScaleHyperprior,
