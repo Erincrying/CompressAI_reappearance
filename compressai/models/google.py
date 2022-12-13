@@ -408,7 +408,7 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
     """
 
     # def __init__(self, N=192, M=192, **kwargs): #原始定义
-    def __init__(self, N=192, M=256, **kwargs): # ll更改
+    def __init__(self, N=192, M=192, **kwargs): # ll更改
 
         super().__init__(N=N, M=M, **kwargs)
         # torch.nn.Sequential是一个Sequential容器，模块将按照构造函数中传递的顺序添加到模块中
@@ -483,6 +483,8 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
         # 混合高斯模型
         gaussian_params = self.entropy_parameters(
             torch.cat((params, ctx_params), dim=1)
+            # 这里在tf。cheng2020里是
+            # tf.concat([mask, tensor], aixs=3),之后三个卷积层，所以在joint里这样建模是单高斯
         )
         # 方差、均值
         scales_hat, means_hat = gaussian_params.chunk(2, 1)
