@@ -97,7 +97,7 @@ def conv1x1(in_ch: int, out_ch: int, stride: int = 1) -> nn.Module:
 
 class ResidualBlockWithStride(nn.Module):
     """Residual block with a stride on the first convolution.
-
+    虚线1x1卷积连接
     Args:
         in_ch (int): number of input channels
         out_ch (int): number of output channels
@@ -105,17 +105,19 @@ class ResidualBlockWithStride(nn.Module):
     """
 
     def __init__(self, in_ch: int, out_ch: int, stride: int = 2):
-        super().__init__()
+        super().__init__() # cheng2020 in_ch3:3,out_ch:192,stride:2
         self.conv1 = conv3x3(in_ch, out_ch, stride=stride)
         self.leaky_relu = nn.LeakyReLU(inplace=True)
-        self.conv2 = conv3x3(out_ch, out_ch)
+        self.conv2 = conv3x3(out_ch, out_ch) # 这个卷积步长默认是1
         self.gdn = GDN(out_ch)
+        # 这里判断的是第一个卷积的步长，用第一个卷积的步长是否为1或者输入输出通道数是否一致判断是否用1x1卷积
         if stride != 1 or in_ch != out_ch:
             self.skip = conv1x1(in_ch, out_ch, stride=stride)
         else:
             self.skip = None
 
     def forward(self, x: Tensor) -> Tensor:
+        # print(x.shape, 'xshape') # torch.Size([16, 3, 256, 256]) xshape
         identity = x
         out = self.conv1(x)
         out = self.leaky_relu(out)
@@ -126,12 +128,13 @@ class ResidualBlockWithStride(nn.Module):
             identity = self.skip(x)
 
         out += identity
+        # print(out.shape, 'outshape') #torch.Size([16, 192, 128, 128]) outshape
         return out
-
-
+    
+    
 class ResidualBlockUpsample(nn.Module):
     """Residual block with sub-pixel upsampling on the last convolution.
-
+    虚线上采样1x1卷积连接
     Args:
         in_ch (int): number of input channels
         out_ch (int): number of output channels
@@ -159,7 +162,7 @@ class ResidualBlockUpsample(nn.Module):
 
 class ResidualBlock(nn.Module):
     """Simple residual block with two 3x3 convolutions.
-
+    实线，残差连接
     Args:
         in_ch (int): number of input channels
         out_ch (int): number of output channels
