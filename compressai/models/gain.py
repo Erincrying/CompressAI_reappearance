@@ -1488,3 +1488,371 @@ class TwoSegmentModel(MeanScaleHyperprior):
                 hp = h + padding
                 wp = w + padding
                 y_hat[:, :, hp : hp + 1, wp : wp + 1] = rv
+                
+class TwoSegmentGa(MeanScaleHyperprior):
+    # 基于JointAutoregressiveHierarchicalPriors更改的可变码率网络
+    def __init__(self, N=192, M=192, **kwargs): # ll更改
+
+        super().__init__(N=N, M=M, **kwargs)
+        self.g_a_lower = nn.Sequential(
+            conv(3, N, kernel_size=5, stride=2),
+            GDN(N),
+            conv(N, N, kernel_size=5, stride=2),
+            GDN(N),
+            conv(N, N, kernel_size=5, stride=2),
+            GDN(N),
+            conv(N, M, kernel_size=5, stride=2),
+        )
+        
+        self.g_a_higher = nn.Sequential(
+            conv(3, N, kernel_size=5, stride=2),
+            GDN(N),
+            conv(N, N, kernel_size=3, stride=2),
+            GDN(N),
+            conv(N, N, kernel_size=3, stride=1),
+            GDN(N),
+            conv(N, N, kernel_size=3, stride=2),
+            GDN(N),
+            conv(N, N, kernel_size=3, stride=1),
+            GDN(N),
+            conv(N, M, kernel_size=5, stride=2),
+        )
+        
+
+        self.g_s_lower = nn.Sequential(
+            deconv(M, N, kernel_size=5, stride=2),
+            GDN(N, inverse=True),
+            deconv(N, N, kernel_size=5, stride=2),
+            GDN(N, inverse=True),
+            deconv(N, N, kernel_size=5, stride=2),
+            GDN(N, inverse=True),
+            deconv(N, 3, kernel_size=5, stride=2),
+        )
+        
+        self.g_s_higher = nn.Sequential(
+            deconv(M, N, kernel_size=5, stride=2),
+            GDN(N, inverse=True),
+            deconv(N, N, kernel_size=5, stride=2),
+            GDN(N, inverse=True),
+            deconv(N, N, kernel_size=5, stride=2),
+            GDN(N, inverse=True),
+            deconv(N, 3, kernel_size=5, stride=2),
+        )
+
+        self.h_a = nn.Sequential(
+            conv(M, N, stride=1, kernel_size=3),
+            nn.LeakyReLU(inplace=True),
+            conv(N, N, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            conv(N, N, stride=2, kernel_size=5),
+        )
+
+        self.h_s = nn.Sequential(
+            deconv(N, M, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            deconv(M, M * 3 // 2, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            conv(M * 3 // 2, M * 2, stride=1, kernel_size=3),
+        )
+
+        self.entropy_parameters = nn.Sequential(
+            nn.Conv2d(M * 12 // 3, M * 10 // 3, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(M * 10 // 3, M * 8 // 3, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(M * 8 // 3, M * 6 // 3, 1),
+        )
+
+        self.context_prediction = MaskedConv2d(
+            M, 2 * M, kernel_size=5, padding=2, stride=1
+        )
+
+        self.gaussian_conditional = GaussianConditional(None)
+        self.N = int(N)
+        self.M = int(M)
+        
+        self.lmbda = [0.05, 0.03, 0.02, 0.01, 0.005, 0.003, 0.001, 0.0003]  # mxh add from HUAWEI CVPR2021 Gained...
+
+        # Condition on Latent y, so the gain vector length M
+        # e.g.: self.levels = 6 means we have 6 pairs gain vectors corresponding to 6 level RD performance
+        # treat all channels the same in initialization
+        # 创建了一个形状为 [self.levels, M] 的张量，并将其包装在 torch.nn.Parameter 类中，表示它是一个模型参数，需要进行训练。
+        # 参数 requires_grad=True 表示需要计算该参数的梯度，并在反向传播时更新该参数的值。
+        # M:通道数
+        self.levels = len(self.lmbda) # 8
+        self.Gain = torch.nn.Parameter(torch.ones(size=[self.levels, M]), requires_grad=True)
+        self.InverseGain = torch.nn.Parameter(torch.ones(size=[self.levels, M]), requires_grad=True)
+        self.HyperGain = torch.nn.Parameter(torch.ones(size=[self.levels, N]), requires_grad=True)
+        self.InverseHyperGain = torch.nn.Parameter(torch.ones(size=[self.levels, N]), requires_grad=True)
+
+    @property
+    def downsampling_factor(self) -> int:
+        return 2 ** (4 + 2)
+    
+    def forward(self, x, s):
+        '''
+            x: input image
+            s: random num to choose gain vector
+        '''
+        if s >= 4: # 低码率点
+            g_a = self.g_a_lower
+            g_s = self.g_s_lower
+        else: # 高码率点
+            g_a = self.g_a_higher
+            g_s = self.g_s_higher
+            
+        # ga->Gain->ha->HyperGain->InverseHyperGain->hs->gaussian_params->InverseGain->g_s
+        y = g_a(x)
+        # Gain
+        y = y * torch.abs(self.Gain[s]).unsqueeze(0).unsqueeze(2).unsqueeze(3) # Gain[s]: [M]  -->  [1,M,1,1]
+        z = self.h_a(y)
+        # HyperGain
+        z = z * torch.abs(self.HyperGain[s]).unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        z_hat, z_likelihoods = self.entropy_bottleneck(z)
+        # InverseHyperGain
+        z_hat = z_hat * torch.abs(self.InverseHyperGain[s]).unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        params = self.h_s(z_hat)
+        y_hat = self.gaussian_conditional.quantize(
+            y, "noise" if self.training else "dequantize"
+        )
+        ctx_params = self.context_prediction(y_hat) # φ
+        # 混合高斯模型
+        gaussian_params = self.entropy_parameters(
+            torch.cat((params, ctx_params), dim=1)
+        )
+        # 方差、均值
+        scales_hat, means_hat = gaussian_params.chunk(2, 1)
+        _, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
+        # InverseGain
+        y_hat = y_hat * torch.abs(self.InverseGain[s]).unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        x_hat = g_s(y_hat)
+        
+        return {
+            "x_hat": x_hat,
+            "likelihoods": {"y": y_likelihoods, "z": z_likelihoods},
+        }
+        
+    @classmethod
+    def from_state_dict(cls, state_dict):
+        """Return a new model instance from `state_dict`."""
+        N = state_dict["g_a.0.weight"].size(0)
+        M = state_dict["g_a.6.weight"].size(0)
+        net = cls(N, M)
+        net.load_state_dict(state_dict)
+        return net
+
+    def compress(self, x, s, l):
+        if next(self.parameters()).device != torch.device("cpu"):
+            warnings.warn(
+                "Inference on GPU is not recommended for the autoregressive "
+                "models (the entropy coder is run sequentially on CPU)."
+            )
+
+        assert s in range(0,self.levels-1), f"s should in range(0, {self.levels-1}), but get s:{s}"
+        assert l >=0 and l <=1, "l should in [0,1]"
+        
+        # l = 0, Interpolated = s+1; l = 1, Interpolated = s
+        # 计算l实现连续码率可变
+        InterpolatedGain = torch.abs(self.Gain[s]).pow(1-l) * torch.abs(self.Gain[s+1]).pow(l)
+        InterpolatedHyperGain = torch.abs(self.HyperGain[s]).pow(1-l) * torch.abs(self.HyperGain[s+1]).pow(l)
+        InterpolatedInverseHyperGain = torch.abs(self.InverseHyperGain[s]).pow(1-l) * torch.abs(self.InverseHyperGain[s+1]).pow(l)
+
+        # InterpolatedGain = torch.abs(self.Gain[s]) * (1 - l) + torch.abs(self.Gain[s + 1]) * l
+        # InterpolatedHyperGain = torch.abs(self.HyperGain[s]) * (1 - l) + torch.abs(self.HyperGain[s + 1]) * l
+        # InterpolatedInverseHyperGain = torch.abs(self.InverseHyperGain[s]) * (1 - l) + torch.abs(self.InverseHyperGain[s + 1]) * (l)
+        
+        if s >= 4: # 低码率点
+            g_a = self.g_a_lower
+            g_s = self.g_s_lower
+        else: # 高码率点
+            g_a = self.g_a_higher
+            g_s = self.g_s_higher
+        
+        y = g_a(x)
+        # 记录没有改变的y
+        ungained_y = y
+        # InterpolatedGain
+        y = y * InterpolatedGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        
+        z = self.h_a(y)
+        # InterpolatedHyperGain
+        z = z * InterpolatedHyperGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        
+        z_strings = self.entropy_bottleneck.compress(z)
+        z_hat = self.entropy_bottleneck.decompress(z_strings, z.size()[-2:])
+        # InterpolatedInverseHyperGain
+        z_hat = z_hat * InterpolatedInverseHyperGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
+
+        params = self.h_s(z_hat)
+
+        s = 4  # scaling factor between z and y
+        kernel_size = 5  # context prediction kernel size
+        padding = (kernel_size - 1) // 2
+
+        y_height = z_hat.size(2) * s
+        y_width = z_hat.size(3) * s
+
+        y_hat = F.pad(y, (padding, padding, padding, padding))
+
+        y_strings = []
+        for i in range(y.size(0)):
+            string = self._compress_ar(
+                y_hat[i : i + 1],
+                params[i : i + 1],
+                y_height,
+                y_width,
+                kernel_size,
+                padding,
+            )
+            y_strings.append(string)
+
+        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+
+    def _compress_ar(self, y_hat, params, height, width, kernel_size, padding):
+        cdf = self.gaussian_conditional.quantized_cdf.tolist()
+        cdf_lengths = self.gaussian_conditional.cdf_length.tolist()
+        offsets = self.gaussian_conditional.offset.tolist()
+
+        encoder = BufferedRansEncoder()
+        symbols_list = []
+        indexes_list = []
+
+        # Warning, this is slow...
+        # TODO: profile the calls to the bindings...
+        masked_weight = self.context_prediction.weight * self.context_prediction.mask
+        for h in range(height):
+            for w in range(width):
+                y_crop = y_hat[:, :, h : h + kernel_size, w : w + kernel_size]
+                ctx_p = F.conv2d(
+                    y_crop,
+                    masked_weight,
+                    bias=self.context_prediction.bias,
+                )
+
+                # 1x1 conv for the entropy parameters prediction network, so
+                # we only keep the elements in the "center"
+                p = params[:, :, h : h + 1, w : w + 1]
+                gaussian_params = self.entropy_parameters(torch.cat((p, ctx_p), dim=1))
+                gaussian_params = gaussian_params.squeeze(3).squeeze(2)
+                scales_hat, means_hat = gaussian_params.chunk(2, 1)
+
+                indexes = self.gaussian_conditional.build_indexes(scales_hat)
+
+                y_crop = y_crop[:, :, padding, padding]
+                y_q = self.gaussian_conditional.quantize(y_crop, "symbols", means_hat)
+                y_hat[:, :, h + padding, w + padding] = y_q + means_hat
+
+                symbols_list.extend(y_q.squeeze().tolist())
+                indexes_list.extend(indexes.squeeze().tolist())
+
+        encoder.encode_with_indexes(
+            symbols_list, indexes_list, cdf, cdf_lengths, offsets
+        )
+
+        string = encoder.flush()
+        return string
+
+    def decompress(self, strings, shape, s, l):
+        assert isinstance(strings, list) and len(strings) == 2
+
+        if next(self.parameters()).device != torch.device("cpu"):
+            warnings.warn(
+                "Inference on GPU is not recommended for the autoregressive "
+                "models (the entropy coder is run sequentially on CPU)."
+            )
+
+        # FIXME: we don't respect the default entropy coder and directly call the
+        # range ANS decoder
+
+        assert s in range(0, self.levels - 1), f"s should in range(0,{self.levels - 1})"
+        assert l >= 0 and l <= 1, "l should in [0,1]"
+        InterpolatedInverseGain = torch.abs(self.InverseGain[s]).pow(1-l) * torch.abs(self.InverseGain[s+1]).pow(l)
+        InterpolatedInverseHyperGain = torch.abs(self.InverseHyperGain[s]).pow(1-l) * torch.abs(self.InverseHyperGain[s+1]).pow(l)
+        # # Linear Interpolation can achieve the same result
+        # InterpolatedInverseGain = torch.abs(self.InverseGain[s]) * (1 - l) + torch.abs(self.InverseGain[s + 1]) * (l)
+        # InterpolatedInverseHyperGain = torch.abs(self.InverseHyperGain[s])* (1 - l) + torch.abs(self.InverseHyperGain[s + 1]) * (l)
+        
+        if s >= 4: # 低码率点
+            g_a = self.g_a_lower
+            g_s = self.g_s_lower
+        else: # 高码率点
+            g_a = self.g_a_higher
+            g_s = self.g_s_higher
+        
+        z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
+        # InterpolatedInverseHyperGain
+        z_hat = z_hat * InterpolatedInverseHyperGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        params = self.h_s(z_hat)
+
+        s = 4  # scaling factor between z and y
+        kernel_size = 5  # context prediction kernel size
+        padding = (kernel_size - 1) // 2
+
+        y_height = z_hat.size(2) * s
+        y_width = z_hat.size(3) * s
+
+        # initialize y_hat to zeros, and pad it so we can directly work with
+        # sub-tensors of size (N, C, kernel size, kernel_size)
+        y_hat = torch.zeros(
+            (z_hat.size(0), self.M, y_height + 2 * padding, y_width + 2 * padding),
+            device=z_hat.device,
+        )
+        
+
+        for i, y_string in enumerate(strings[0]):
+            self._decompress_ar(
+                y_string,
+                y_hat[i : i + 1],
+                params[i : i + 1],
+                y_height,
+                y_width,
+                kernel_size,
+                padding,
+            )
+
+        y_hat = F.pad(y_hat, (-padding, -padding, -padding, -padding))
+        # InterpolatedInverseGain
+        y_hat = y_hat * InterpolatedInverseGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
+        x_hat = g_s(y_hat).clamp_(0, 1)
+        return {"x_hat": x_hat}
+
+    def _decompress_ar(
+        self, y_string, y_hat, params, height, width, kernel_size, padding
+    ):
+        cdf = self.gaussian_conditional.quantized_cdf.tolist()
+        cdf_lengths = self.gaussian_conditional.cdf_length.tolist()
+        offsets = self.gaussian_conditional.offset.tolist()
+
+        decoder = RansDecoder()
+        decoder.set_stream(y_string)
+
+        # Warning: this is slow due to the auto-regressive nature of the
+        # decoding... See more recent publication where they use an
+        # auto-regressive module on chunks of channels for faster decoding...
+        for h in range(height):
+            for w in range(width):
+                # only perform the 5x5 convolution on a cropped tensor
+                # centered in (h, w)
+                y_crop = y_hat[:, :, h : h + kernel_size, w : w + kernel_size]
+                ctx_p = F.conv2d(
+                    y_crop,
+                    self.context_prediction.weight,
+                    bias=self.context_prediction.bias,
+                )
+                # 1x1 conv for the entropy parameters prediction network, so
+                # we only keep the elements in the "center"
+                p = params[:, :, h : h + 1, w : w + 1]
+                gaussian_params = self.entropy_parameters(torch.cat((p, ctx_p), dim=1))
+                scales_hat, means_hat = gaussian_params.chunk(2, 1)
+
+                indexes = self.gaussian_conditional.build_indexes(scales_hat)
+                rv = decoder.decode_stream(
+                    indexes.squeeze().tolist(), cdf, cdf_lengths, offsets
+                )
+                rv = torch.Tensor(rv).reshape(1, -1, 1, 1)
+                rv = self.gaussian_conditional.dequantize(rv, means_hat)
+
+                hp = h + padding
+                wp = w + padding
+                y_hat[:, :, hp : hp + 1, wp : wp + 1] = rv
+                
