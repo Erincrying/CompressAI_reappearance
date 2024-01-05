@@ -904,8 +904,10 @@ class JointGain(MeanScaleHyperprior):
                 padding,
             )
             y_strings.append(string)
-
-        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+        gained_y_hat = self.gaussian_conditional.quantize(y, "symbols")
+        return {"strings": [y_strings, z_strings], 
+                "shape": z.size()[-2:],
+                "gained_y_hat": gained_y_hat}
 
     def _compress_ar(self, y_hat, params, height, width, kernel_size, padding):
         cdf = self.gaussian_conditional.quantized_cdf.tolist()
@@ -1004,10 +1006,11 @@ class JointGain(MeanScaleHyperprior):
             )
 
         y_hat = F.pad(y_hat, (-padding, -padding, -padding, -padding))
+        gained_y_hat = y_hat
         # InterpolatedInverseGain
         y_hat = y_hat * InterpolatedInverseGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
         x_hat = self.g_s(y_hat).clamp_(0, 1)
-        return {"x_hat": x_hat}
+        return {"x_hat": x_hat, "gained_y_hat": gained_y_hat}
 
     def _decompress_ar(
         self, y_string, y_hat, params, height, width, kernel_size, padding
@@ -1322,7 +1325,10 @@ class TwoSegmentModel(MeanScaleHyperprior):
             )
             y_strings.append(string)
 
-        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+        gained_y_hat = self.gaussian_conditional.quantize(y, "symbols")
+        return {"strings": [y_strings, z_strings], 
+                "shape": z.size()[-2:],
+                "gained_y_hat": gained_y_hat}
 
     def _compress_ar(self, y_hat, params, height, width, kernel_size, padding, s):
         if s >= 4: # 低码率点
@@ -1437,10 +1443,11 @@ class TwoSegmentModel(MeanScaleHyperprior):
             )
 
         y_hat = F.pad(y_hat, (-padding, -padding, -padding, -padding))
+        gained_y_hat = y_hat
         # InterpolatedInverseGain
         y_hat = y_hat * InterpolatedInverseGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
         x_hat = g_s(y_hat).clamp_(0, 1)
-        return {"x_hat": x_hat}
+        return {"x_hat": x_hat, "gained_y_hat": gained_y_hat}
 
     def _decompress_ar(
         self, y_string, y_hat, params, height, width, kernel_size, padding, s
@@ -1706,7 +1713,10 @@ class TwoSegmentGa(MeanScaleHyperprior):
             )
             y_strings.append(string)
 
-        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+        gained_y_hat = self.gaussian_conditional.quantize(y, "symbols")
+        return {"strings": [y_strings, z_strings], 
+                "shape": z.size()[-2:],
+                "gained_y_hat": gained_y_hat}
 
     def _compress_ar(self, y_hat, params, height, width, kernel_size, padding):
         cdf = self.gaussian_conditional.quantized_cdf.tolist()
@@ -1811,10 +1821,11 @@ class TwoSegmentGa(MeanScaleHyperprior):
             )
 
         y_hat = F.pad(y_hat, (-padding, -padding, -padding, -padding))
+        gained_y_hat = y_hat
         # InterpolatedInverseGain
         y_hat = y_hat * InterpolatedInverseGain.unsqueeze(0).unsqueeze(2).unsqueeze(3)
         x_hat = g_s(y_hat).clamp_(0, 1)
-        return {"x_hat": x_hat}
+        return {"x_hat": x_hat, "gained_y_hat": gained_y_hat}
 
     def _decompress_ar(
         self, y_string, y_hat, params, height, width, kernel_size, padding
