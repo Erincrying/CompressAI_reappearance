@@ -40,6 +40,8 @@ from compressai.layers import GDN, MaskedConv2d
 
 from .utils import conv, deconv, update_registered_buffers
 
+import time
+
 __all__ = [
     "CompressionModel",
     "FactorizedPrior",
@@ -598,6 +600,13 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
 
         # FIXME: we don't respect the default entropy coder and directly call the
         # range ANS decoder
+        
+        # ll 添加时间
+        start_time = time.process_time()
+        
+        # ll 添加时间
+        # hyper synthesis time
+        time1 = time.process_time()
 
         z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
         params = self.h_s(z_hat)
@@ -611,6 +620,9 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
 
         # initialize y_hat to zeros, and pad it so we can directly work with
         # sub-tensors of size (N, C, kernel size, kernel_size)
+        # ll 添加时间
+        # entropy estimation time
+        time2 = time.process_time()
         y_hat = torch.zeros(
             (z_hat.size(0), self.M, y_height + 2 * padding, y_width + 2 * padding),
             device=z_hat.device,
@@ -628,8 +640,30 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
             )
 
         y_hat = F.pad(y_hat, (-padding, -padding, -padding, -padding))
+        # ll 添加时间
+        # synthesis time
+        time3 = time.process_time()
         x_hat = self.g_s(y_hat).clamp_(0, 1)
-        return {"x_hat": x_hat}
+        
+        # ll 添加时间
+        time4 = time.process_time()
+        
+        hyper_synthesis_time = time2 - time1
+        entropy_estimate_time = time3 - time2
+        synthesis_time = time4 - time3
+
+        end_time = time.process_time()
+        cost_time = end_time - start_time
+        
+        # return {"x_hat": x_hat}
+        # 修改return
+        return {
+            "x_hat": x_hat,
+            "cost_time": cost_time,
+            "hyper_synthesis_time": hyper_synthesis_time,
+            "entropy_estimate_time": entropy_estimate_time,
+            "synthesis_time": synthesis_time
+        }
 
     def _decompress_ar(
         self, y_string, y_hat, params, height, width, kernel_size, padding
