@@ -905,7 +905,9 @@ class JointGain(MeanScaleHyperprior):
             )
             y_strings.append(string)
         gained_y_hat = self.gaussian_conditional.quantize(y, "symbols")
-        return {"strings": [y_strings, z_strings], 
+        return {"y_strings": y_strings,
+                "z_strings": z_strings,
+                "strings": [y_strings, z_strings], 
                 "shape": z.size()[-2:],
                 "gained_y_hat": gained_y_hat}
 
